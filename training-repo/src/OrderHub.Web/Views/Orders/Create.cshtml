@@ -91,6 +91,13 @@
                 });
                 table.appendChild(clone);
                 reindexRows();
+
+                // jQuery Unobtrusive Validation only scans the form once on page load, so a
+                // cloned row's inputs are invisible to it until we re-parse the form.
+                var $form = $('#create-order-form');
+                $form.removeData('validator');
+                $form.removeData('unobtrusiveValidation');
+                $.validator.unobtrusive.parse($form);
             });
 
             table.addEventListener('click', function (e) {
