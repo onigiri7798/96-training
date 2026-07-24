@@ -23,6 +23,8 @@ Claude Code（Sonnet 5）
 
 **練習 3**：這次流程不一樣——先讓 agent 進 Plan Mode，讀完既有慣例（`ProductsController`、`IProductService`、既有 View、既有測試風格）之後先出一份完整計畫（要動哪些檔、每層放什麼、怎麼避免 N+1、驗證機制放哪），我看過確認才放行實作，沒有中途才發現分層跑掉。實作完也主動叫 `code-reviewer` subagent 審查一次（練習 1 裝好之後第一次真的拿來用），抓到問題才 commit。
 
+**練習 4**：範圍小很多（單一檔案、機械式抽取），這次沒有再進正式 Plan Mode，agent 直接用文字說明計畫（要抽哪兩個方法、命名、為什麼不另開一個 Validator 類別）讓我確認，我回「yes, go ahead」才動手——比練習 3 輕量，但「先講計畫、我確認再做」這個順序沒有變。
+
 ### 2. AI 幫上大忙的地方
 
 Bug 1（分頁）最明顯：我只回了一句「the last page is empty after creating the new order」，agent 就直接在 `OrderRepository.GetPagedAsync` 抓到 `Skip(page * pageSize)` 應該是 `Skip((page - 1) * pageSize)` 的 off-by-one，還一次解釋清楚「新訂單在第一頁不見」跟「最後一頁空白」其實是同一個根因——比我自己去 trace 分頁邏輯快很多。
@@ -44,6 +46,8 @@ Bug 2 一開始 agent 純粹看 code，就先下了一個判斷：「Gold 應該
 修完 Bug 1 之後，我在頁面上測「還是壞的」，但其實根因當下已經改好了——問題出在那個 `dotnet run` 的 process 是修 code **之前**就啟動的舊 build，沒有重新編譯就繼續 serve 舊行為。後來才確認要 `dotnet build` 再重新啟動 process 才會生效。
 
 **具體做法**：以後改完 server-side 程式碼要回頁面重新驗證時，先確認「現在跑著的 process 是不是改 code 之後才起的」；不確定就直接找出佔用該 port 的 process、kill 掉、重新 `build`、重新 `run`，不要憑印象覺得「應該有 hot reload」。
+
+**練習 4 補充**：小重構要求「行為完全不變」，光跑 `dotnet test` 全綠還不夠讓我完全放心，所以這次額外做了一次跟練習沒直接要求、但我覺得值得做的事——重構後直接對著跑著的網站送一次真實表單，建一筆訂單、再故意送一次重複商品觸發驗證錯誤，兩者都跟重構前行為一致。**具體做法**：小重構「測試全綠」只證明「原本測過的行為」沒壞，沒測到的路徑（例如某個特定的驗證訊息文字、某個邊界情況）不會因為 unit test 綠燈就保證沒事——如果重構的地方剛好是輸入驗證這種「靠文字訊息判斷對不對」的邏輯，值得另外花一分鐘實際打一次 API 或表單，肉眼看訊息字串真的沒變。
 
 ---
 
@@ -79,6 +83,12 @@ Bug 2 一開始 agent 純粹看 code，就先下了一個判斷：「Gold 應該
 4. [x] 停售（已停售 badge）商品不出現在列表 —— agent 直接對本機 `OrderHubTraining` 資料庫下 SQL：把 SKU-1002（原本庫存 101、上架中）暫時改成庫存 3、`IsActive=0`，確認 `/Products` 頁面看得到它（庫存 3），但 `/Products/LowStock?threshold=10` 完全沒有它；驗證完立刻把 SKU-1002 改回庫存 101、`IsActive=1`，資料庫已還原
 5. [x] 程式分層與命名跟既有的 Products 功能一致（請 agent 自我 review 一次，並自己確認）—— 有請 `code-reviewer` subagent 審查，抓到兩個真實問題（`[Range]` attribute 沒作用、`LowStockProduct` 命名空間放錯）並修掉了；「並自己確認」那半句我自己還沒再重看一次 diff
 6. [x] 至少 3 個新測試，`dotnet test` 全綠 —— 6 個新測試（4 個 service 層 + 2 個 controller 層），`dotnet test` 44/44 全綠
+
+練習 4
+
+1. [x] 重構後 `dotnet test` 全綠 —— 44/44 全綠，包含練習 2、3 補的所有回歸測試；另外對跑著的網站補跑了一次真實表單（建單成功、重複商品仍正確被拒絕），確認不是只有 unit test 綠燈
+2. [ ] 我能說出這次重構「改善了什麼、沒有改變什麼」—— 這題留給我自己：改善的是 `CreateOrderAsync` 從一長串驗證+建構混在一起，拆成 `ValidateBasicRequest`（四項整單檢查）跟 `ValidateAndReserveStock`（單一品項檢查＋扣庫存＋建立 `OrderItem`）兩個私有方法；沒有改變的是所有錯誤訊息文字、檢查順序、扣庫存的時機都跟原本一模一樣。之後想自己閉卷再講一次確認真的懂
+3. [ ] 我有在 code review 的角度看過 diff（不是 agent 說好就好）—— 還沒自己重看，之後要看一次 `git show a564fcb`
 
 ---
 
