@@ -40,7 +40,30 @@ public class OrderService : IOrderService
         if (basicError is not null)
             return ServiceResult<Order>.Fail(basicError);
 
+        // Validate every line before mutating anything. Deducting stock line-by-line as we go
+        // would leave already-tracked Product entities decremented in memory even when the
+        // order as a whole is rejected — since nothing gets saved on failure, the DB itself
+        // stays correct, but any later read against the same DbContext (e.g. re-populating the
+        // Create form's product dropdown) would see the wrong, never-persisted stock number.
         var errors = new List<string>();
+        var validatedProducts = new List<Product>();
+
+        foreach (var line in lines)
+        {
+            var product = await _productRepository.GetByIdAsync(line.ProductId);
+            var lineError = ValidateLine(product, line);
+            if (lineError is not null)
+            {
+                errors.Add(lineError);
+                continue;
+            }
+
+            validatedProducts.Add(product!);
+        }
+
+        if (errors.Count > 0)
+            return ServiceResult<Order>.Fail(errors);
+
         var order = new Order
         {
             CustomerId = customer!.Id,
@@ -48,21 +71,19 @@ public class OrderService : IOrderService
             CreatedAt = DateTime.UtcNow
         };
 
-        foreach (var line in lines)
+        for (var i = 0; i < lines.Count; i++)
         {
-            var product = await _productRepository.GetByIdAsync(line.ProductId);
-            var lineError = ValidateAndReserveStock(product, line, out var item);
-            if (lineError is not null)
+            var line = lines[i];
+            var product = validatedProducts[i];
+
+            product.StockQuantity -= line.Quantity;
+            order.Items.Add(new OrderItem
             {
-                errors.Add(lineError);
-                continue;
-            }
-
-            order.Items.Add(item!);
+                ProductId = product.Id,
+                Quantity = line.Quantity,
+                UnitPriceSnapshot = product.UnitPrice
+            });
         }
-
-        if (errors.Count > 0)
-            return ServiceResult<Order>.Fail(errors);
 
         await _orderRepository.AddAsync(order);
         await _orderRepository.SaveChangesAsync();
@@ -87,23 +108,14 @@ public class OrderService : IOrderService
         return null;
     }
 
-    private static string? ValidateAndReserveStock(Product? product, NewOrderLine line, out OrderItem? item)
+    private static string? ValidateLine(Product? product, NewOrderLine line)
     {
-        item = null;
-
         if (product is null || !product.IsActive)
             return $"商品（Id={line.ProductId}）不存在或已停售";
 
         if (product.StockQuantity < line.Quantity)
             return $"商品「{product.Name}」庫存不足（現有 {product.StockQuantity}，需求 {line.Quantity}）";
 
-        product.StockQuantity -= line.Quantity;
-        item = new OrderItem
-        {
-            ProductId = product.Id,
-            Quantity = line.Quantity,
-            UnitPriceSnapshot = product.UnitPrice
-        };
         return null;
     }
 

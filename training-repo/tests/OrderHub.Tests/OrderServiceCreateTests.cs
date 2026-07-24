@@ -193,4 +193,22 @@ public class OrderServiceCreateTests
 
         Assert.Equal(0, db.Orders.Count());
     }
+
+    [Fact]
+    public async Task CreateOrder_PartialFailure_DoesNotMutateStockForValidLines()
+    {
+        using var db = TestSetup.CreateContext();
+        var service = TestSetup.CreateOrderService(db);
+        var customer = TestSetup.AddCustomer(db);
+        var product = TestSetup.AddProduct(db, stock: 5);
+
+        var result = await service.CreateOrderAsync(customer.Id, new[]
+        {
+            new NewOrderLine(product.Id, 2),
+            new NewOrderLine(999, 1)
+        });
+
+        Assert.False(result.Success);
+        Assert.Equal(5, db.Products.Single(p => p.Id == product.Id).StockQuantity);
+    }
 }
