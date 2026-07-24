@@ -36,6 +36,55 @@ public class OrderServiceCreateTests
         Assert.Equal(380m, result.Value!.Items.Single().UnitPriceSnapshot);
     }
 
+    [Theory]
+    [InlineData(CustomerTier.Standard)]
+    [InlineData(CustomerTier.Silver)]
+    [InlineData(CustomerTier.Gold)]
+    public async Task CreateOrder_SnapshotsRawUnitPrice_RegardlessOfCustomerTier(CustomerTier tier)
+    {
+        using var db = TestSetup.CreateContext();
+        var service = TestSetup.CreateOrderService(db);
+        var customer = TestSetup.AddCustomer(db, tier: tier);
+        var product = TestSetup.AddProduct(db, unitPrice: 1000m);
+
+        var result = await service.CreateOrderAsync(customer.Id, new[] { new NewOrderLine(product.Id, 1) });
+
+        Assert.True(result.Success);
+        Assert.Equal(1000m, result.Value!.Items.Single().UnitPriceSnapshot);
+    }
+
+    [Fact]
+    public async Task CreateOrder_GoldMember_TotalIsDiscountedOnlyOnce()
+    {
+        using var db = TestSetup.CreateContext();
+        var service = TestSetup.CreateOrderService(db);
+        var customer = TestSetup.AddCustomer(db, tier: CustomerTier.Gold);
+        var product = TestSetup.AddProduct(db, unitPrice: 1000m);
+
+        var result = await service.CreateOrderAsync(customer.Id, new[] { new NewOrderLine(product.Id, 1) });
+
+        Assert.True(result.Success);
+        var order = result.Value!;
+        order.Customer = customer;
+        Assert.Equal(900m, service.CalculateTotal(order));
+    }
+
+    [Fact]
+    public async Task CreateOrder_SilverMember_TotalGetsFivePercentOff()
+    {
+        using var db = TestSetup.CreateContext();
+        var service = TestSetup.CreateOrderService(db);
+        var customer = TestSetup.AddCustomer(db, tier: CustomerTier.Silver);
+        var product = TestSetup.AddProduct(db, unitPrice: 1000m);
+
+        var result = await service.CreateOrderAsync(customer.Id, new[] { new NewOrderLine(product.Id, 1) });
+
+        Assert.True(result.Success);
+        var order = result.Value!;
+        order.Customer = customer;
+        Assert.Equal(950m, service.CalculateTotal(order));
+    }
+
     [Fact]
     public async Task CreateOrder_DecrementsProductStock()
     {
