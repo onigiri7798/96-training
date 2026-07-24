@@ -80,6 +80,12 @@ Bug 2 一開始 agent 純粹看 code，就先下了一個判斷：「Gold 應該
 5. [x] 程式分層與命名跟既有的 Products 功能一致（請 agent 自我 review 一次，並自己確認）—— 有請 `code-reviewer` subagent 審查，抓到兩個真實問題（`[Range]` attribute 沒作用、`LowStockProduct` 命名空間放錯）並修掉了；「並自己確認」那半句我自己還沒再重看一次 diff
 6. [x] 至少 3 個新測試，`dotnet test` 全綠 —— 6 個新測試（4 個 service 層 + 2 個 controller 層），`dotnet test` 44/44 全綠
 
+練習 4
+
+1. [x] 重構後 `dotnet test` 全綠 —— 44/44 全綠，包含練習 2、3 補的所有回歸測試；另外對跑著的網站補跑了一次真實表單（建單成功、重複商品仍正確被拒絕），確認不是只有 unit test 綠燈
+2. [x] 我能說出這次重構「改善了什麼、沒有改變什麼」。
+3. [x] 我有在 code review 的角度看過 diff（不是 agent 說好就好）
+
 ---
 
 ## 附錄：值得留下的對話片段
