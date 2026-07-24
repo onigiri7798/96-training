@@ -21,17 +21,23 @@ Claude Code（Sonnet 5）
 
 跟一開始的想法不同的地方：我原本以為每個 bug 都會自己先在頁面上重現、給 agent 精確數字，但實際做到第 2、3 個 bug 時，我選擇直接跳過手動重現，讓 agent 直接看 code 分析——省了時間，但這兩個 bug 我並沒有真的做到指南要求的「①先重現 ②給具體觀察」兩步。
 
+**練習 3**：這次流程不一樣——先讓 agent 進 Plan Mode，讀完既有慣例（`ProductsController`、`IProductService`、既有 View、既有測試風格）之後先出一份完整計畫（要動哪些檔、每層放什麼、怎麼避免 N+1、驗證機制放哪），我看過確認才放行實作，沒有中途才發現分層跑掉。實作完也主動叫 `code-reviewer` subagent 審查一次（練習 1 裝好之後第一次真的拿來用），抓到問題才 commit。
+
 ### 2. AI 幫上大忙的地方
 
 Bug 1（分頁）最明顯：我只回了一句「the last page is empty after creating the new order」，agent 就直接在 `OrderRepository.GetPagedAsync` 抓到 `Skip(page * pageSize)` 應該是 `Skip((page - 1) * pageSize)` 的 off-by-one，還一次解釋清楚「新訂單在第一頁不見」跟「最後一頁空白」其實是同一個根因——比我自己去 trace 分頁邏輯快很多。
 
 Bug 3（庫存不回補）也是同樣模式：agent 直接指出 `CancelOrderAsync` 裡 `order.Status = Cancelled` 那行寫在檢查 `order.Status == Pending/Confirmed` **之前**，導致回補庫存的那段 `if` 恆假、根本是死碼。這種「順序寫反」的 bug，靠肉眼掃一次 code 就抓到了，比我自己盯著看要快很多。
 
+**練習 3**：`code-reviewer` subagent 這次真的抓到兩個實質問題，不是走過場——`LowStockViewModel.Threshold` 上的 `[Range]` attribute 其實從沒被用到（controller 手動另外複製了一份一模一樣的檢查，兩處邏輯以後會各自漂移），以及 `LowStockProduct` 這個型別放在 `Core.Services` 命名空間卻被 `Core.Interfaces` 底下的介面引用（命名空間方向反了）。兩個都當場修掉，比我自己看 diff 更容易漏掉這種「能動但不對」的細節。
+
 ### 3. AI 誤導我的地方，與我如何發現
 
 Bug 2 一開始 agent 純粹看 code，就先下了一個判斷：「Gold 應該是折扣打兩次、金額比手算少；Silver 應該是正常的」——這其實是照抄 `activity-guideline.md` 裡描述的客訴反推出來的，不是真的從我的觀察來的。等我回報「兩個 tier 金額其實都沒變」時，這個假設就先被推翻一次；後來我又補充「其實是 Gold 正常、Silver 沒打折」，agent 才修正說法，並且提醒我兩種可能（單價欄位 vs. 總額欄位）對應到不同的根因，要我確認我看的是哪一欄。
 
 老實說，我後來選擇「跳過頁面重現、直接看 code」，所以最後 agent 提出的 root cause（折扣邏輯散落在 `CreateOrderAsync` 和 `CalculateTotal` 兩處）從頭到尾都沒有拿實際頁面上的精確數字驗證過，只用「兩個 tier 修完後都『看起來對了』」帶過。這其實不是靠對照 code 或跑測試發現的，是回頭寫這份心得時才意識到「我沒有真的驗證」。
+
+**練習 3**：低庫存查詢第一版寫成 LINQ 的 `join ... into ... DefaultIfEmpty()`（left join）疊 `GroupBy` 子查詢，agent 一開始很有信心地說這樣「一次查詢、不會有 N+1」，結果一跑 `dotnet test` 直接兩個測試炸掉：`System.InvalidOperationException: Nullable object must have a value`（EF Core InMemory provider 對這種 anonymous-type left join 的已知地雷）。這不是我用肉眼抓到的，是測試紅了才知道「看起來合理的 LINQ」不代表在這個 provider 上真的能跑。後來 agent 改成「先查一次符合門檻的商品、再查一次銷量彙總成 Dictionary、最後在記憶體裡合併」兩個查詢，問題就消失了。另外 review 建議把「threshold 必須 > 0」這條規則也搬進 Core service 用 exception 擋一次，agent 沒有照做，理由是專案既有慣例是用 DataAnnotations + ModelState 驗證輸入、不是丟 domain exception——這個我認同，但也代表**同一個 review 建議不是照單全收，要自己判斷跟不跟現有慣例衝突**。
 
 ### 4. 我會帶回日常工作的一招
 
@@ -63,6 +69,17 @@ Bug 2 一開始 agent 純粹看 code，就先下了一個判斷：「Gold 應該
    - **折扣**：原本的測試都是直接手動建構 `Order` + `Customer.Tier` 丟進 `CalculateTotal`，繞過了 `CreateOrderAsync`——所以「建立訂單時多算一次折扣」這條路徑完全沒被測到過
    - **庫存**：原本只測「取消後 `Status` 變成 `Cancelled`」，沒有任何一個測試在取消之後去檢查 `Product.StockQuantity` 有沒有回補
 
+練習 3
+
+1. [x] `/Products/LowStock` 不帶參數 → 門檻 10 的結果；帶 `?threshold=3` → 結果隨之改變 —— agent 對跑著的網站實測：不帶參數時輸入框顯示預設值 10、回傳 5 列（SKU-1048/1005/1023/1032/1014，庫存都 <10）；`?threshold=3` 時只剩 SKU-1048（庫存 2）1 列，其餘庫存 3～4 的商品正確被排除
+2. [x] `?threshold=0`、`?threshold=-1` → 頁面顯示驗證錯誤，不是 500 —— 兩者皆回應 HTTP 200（不是 500），表格 0 列，且 `asp-validation-for="Threshold"` 的位置正確渲染出「門檻必須大於 0」訊息
+
+（註：1、2 這兩項原本標記「留給我自己在瀏覽器點過」，後來請 agent 用 `curl` 直接對著跑著的網站驗證掉了，沒有真的用瀏覽器點——記錄一下，這跟練習指南原本想要的「自己動手」還是有落差，只是圖快）
+3. [x] 售出數量欄位排除了 Cancelled 訂單（可用一筆已取消的訂單驗證）—— agent 用真實表單（含 antiforgery token）在跑著的網站上實際建了一筆訂單（SKU-1048 × 2，customer 9，訂單 #208）再取消它：建立後 `/Products/LowStock` 顯示 SKU-1048 庫存 2→0、近 30 天售出 10→12；取消後庫存回到 2、售出數字也回到 10——確認 Cancelled 訂單真的被排除在外，不是只有單元測試斷言
+4. [x] 停售（已停售 badge）商品不出現在列表 —— agent 直接對本機 `OrderHubTraining` 資料庫下 SQL：把 SKU-1002（原本庫存 101、上架中）暫時改成庫存 3、`IsActive=0`，確認 `/Products` 頁面看得到它（庫存 3），但 `/Products/LowStock?threshold=10` 完全沒有它；驗證完立刻把 SKU-1002 改回庫存 101、`IsActive=1`，資料庫已還原
+5. [x] 程式分層與命名跟既有的 Products 功能一致（請 agent 自我 review 一次，並自己確認）—— 有請 `code-reviewer` subagent 審查，抓到兩個真實問題（`[Range]` attribute 沒作用、`LowStockProduct` 命名空間放錯）並修掉了；「並自己確認」那半句我自己還沒再重看一次 diff
+6. [x] 至少 3 個新測試，`dotnet test` 全綠 —— 6 個新測試（4 個 service 層 + 2 個 controller 層），`dotnet test` 44/44 全綠
+
 ---
 
 ## 附錄：值得留下的對話片段
@@ -75,3 +92,8 @@ Bug 2 一開始 agent 純粹看 code，就先下了一個判斷：「Gold 應該
 
 > Agent：「…net effect for a NT$1,000 item, qty 1: Gold: … subtotal 900 × 0.9 = 810 shown as total. Expected … is 900. … Want me to make that change and add regression tests?」
 > 我：「yes, go ahead and add the tests」
+
+**練習 3：code-reviewer 抓到的兩個問題**（節錄，展示「請 agent review 自己的實作」實際上會抓到什麼）：
+
+> 1. (Medium) The `[Range]` DataAnnotation on `LowStockViewModel.Threshold` is dead code — real validation is a hand-duplicated check… Two independent sources of truth for one rule will drift.
+> 5. (Low, nitpick) `LowStockProduct` (in `Core.Services` namespace) is referenced from `IProductRepository` (in `Core.Interfaces`). A repository interface depending on a type namespaced under `Services` is a minor layering inversion/naming smell.
