@@ -76,6 +76,24 @@ public class OrderServiceQueryTests
     }
 
     [Fact]
+    public async Task GetOrders_PageBeyondTotalPages_ClampsToLastPage()
+    {
+        using var db = TestSetup.CreateContext();
+        var service = TestSetup.CreateOrderService(db);
+        var customer = TestSetup.AddCustomer(db);
+
+        for (var i = 0; i < 45; i++)
+            db.Orders.Add(new Order { CustomerId = customer.Id, Status = OrderStatus.Confirmed, CreatedAt = DateTime.UtcNow.AddMinutes(-i) });
+        db.SaveChanges();
+
+        var result = await service.GetOrdersAsync(500, 20, null);
+
+        Assert.Equal(3, result.TotalPages);
+        Assert.Equal(3, result.Page);
+        Assert.Equal(5, result.Items.Count);
+    }
+
+    [Fact]
     public async Task GetCustomerOrders_ReturnsOnlyThatCustomersOrders()
     {
         using var db = TestSetup.CreateContext();

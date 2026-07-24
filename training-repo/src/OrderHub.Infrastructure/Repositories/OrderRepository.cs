@@ -27,6 +27,10 @@ public class OrderRepository : IOrderRepository
 
         var totalCount = await query.CountAsync();
 
+        var totalPages = pageSize <= 0 ? 0 : (int)Math.Ceiling(totalCount / (double)pageSize);
+        if (totalPages > 0 && page > totalPages)
+            page = totalPages;
+
         var items = await query
             .OrderByDescending(o => o.CreatedAt)
             .Skip((page - 1) * pageSize)
