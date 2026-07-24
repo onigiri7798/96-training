@@ -7,5 +7,6 @@ public interface IProductRepository
     Task<IReadOnlyList<Product>> GetAllAsync();
     Task<IReadOnlyList<Product>> GetActiveAsync();
     Task<Product?> GetByIdAsync(int id);
+    Task<IReadOnlyList<LowStockProduct>> GetLowStockAsync(int threshold, DateTime salesSince);
     Task SaveChangesAsync();
 }
