@@ -35,6 +35,8 @@ Bug 3（庫存不回補）也是同樣模式：agent 直接指出 `CancelOrderAs
 
 **活動 2 練習 1**：兩個地方比我自己動手快很多。第一，`CLAUDE.md` 寫著「加 NuGet 套件前要先跟我確認」，agent 在跑 `dotnet add package` 之前真的停下來問我 `ModelContextProtocol` 跟 `Microsoft.Extensions.Hosting` 這兩個套件可不可以加，沒有自己先斬後奏。第二，`dotnet new console` 預設把新專案的 `TargetFramework` 建成 `net10.0`，但其他三個專案都是 `net8.0`——agent 自己發現這個不一致並改掉，不然這種「編譯得過但跟專案慣例不一致」的細節我很可能事後才會注意到。
 
+**活動 2 練習 3（before/after 對照）**：模擬「沒有 MCP」的情況——問「哪些商品庫存低於 5？」時不呼叫工具，改用 `sqlcmd -S localhost -d OrderHubTraining -Q "SELECT Sku, Name, StockQuantity FROM Products WHERE StockQuantity < 5 AND IsActive = 1 ORDER BY StockQuantity ASC"` 直接查 DB——要自己想清楚 `IsActive` 這個過濾條件、自己下 `ORDER BY`，而且這台 Windows 機器的 `sqlcmd` 把中文欄位印成亂碼（例如「晨光 行動電源」變成 `���� �Є��Դ`），商品名稱完全看不懂，還得另外處理編碼問題才能對答案。裝上 MCP 之後，同一個問題一次 `low_stock(threshold=5)` 呼叫就拿到乾淨的 JSON：5 筆（SKU-1048/1005/1023/1032/1014，庫存 2～4），中文名稱正常顯示，門檻／排序／停售過濾這些業務規則完全不用自己重新想一遍——直接複用 service 層已經寫好、練習 3（活動 1）驗證過的規則，兩條路徑算出來的商品清單完全一致。
+
 ### 3. AI 誤導我的地方，與我如何發現
 
 Bug 2 一開始 agent 純粹看 code，就先下了一個判斷：「Gold 應該是折扣打兩次、金額比手算少；Silver 應該是正常的」——這其實是照抄 `activity-guideline.md` 裡描述的客訴反推出來的，不是真的從我的觀察來的。等我回報「兩個 tier 金額其實都沒變」時，這個假設就先被推翻一次；後來我又補充「其實是 Gold 正常、Silver 沒打折」，agent 才修正說法，並且提醒我兩種可能（單價欄位 vs. 總額欄位）對應到不同的根因，要我確認我看的是哪一欄。
@@ -105,7 +107,13 @@ Bug 2 一開始 agent 純粹看 code，就先下了一個判斷：「Gold 應該
 
 練習 2 全是手動用 Inspector 驗證，沒有動到 `OrderHubTools.cs` 的程式碼——練習指南本身也沒有要求這步獨立 commit。
 
-練習 0、3～5 還沒開始。
+練習 3
+
+1. [x] Claude Code 輸入 `/mcp` 能看到 orderhub server 與三個工具 —— `training-repo/.mcp.json` 已經是照指南格式寫好（`command: dotnet`, `args: ["run", "--project", "src/OrderHub.Mcp"]`），連線後 `get_order`/`low_stock`/`customer_orders` 三個工具都可直接呼叫，description 跟 `OrderHubTools.cs` 一致
+2. [x] 對照實驗完成且記錄 —— 見上方「AI 幫上大忙的地方」的 before/after 段落：沒有 MCP 得自己寫 SQL、自己記得 `IsActive` 過濾條件、還要處理中文亂碼；有 MCP 一次 `low_stock(threshold=5)` 呼叫拿到乾淨結果，兩邊算出的 5 筆商品（SKU-1048/1005/1023/1032/1014）完全一致
+3. [x] `.mcp.json` 進 git，一個獨立 commit
+
+練習 0、4～5 還沒開始。
 
 ---
 
