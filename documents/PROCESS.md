@@ -37,11 +37,15 @@ Bug 3（庫存不回補）也是同樣模式：agent 直接指出 `CancelOrderAs
 
 **活動 2 練習 3（before/after 對照）**：模擬「沒有 MCP」的情況——問「哪些商品庫存低於 5？」時不呼叫工具，改用 `sqlcmd -S localhost -d OrderHubTraining -Q "SELECT Sku, Name, StockQuantity FROM Products WHERE StockQuantity < 5 AND IsActive = 1 ORDER BY StockQuantity ASC"` 直接查 DB——要自己想清楚 `IsActive` 這個過濾條件、自己下 `ORDER BY`，而且這台 Windows 機器的 `sqlcmd` 把中文欄位印成亂碼（例如「晨光 行動電源」變成 `���� �Є��Դ`），商品名稱完全看不懂，還得另外處理編碼問題才能對答案。裝上 MCP 之後，同一個問題一次 `low_stock(threshold=5)` 呼叫就拿到乾淨的 JSON：5 筆（SKU-1048/1005/1023/1032/1014，庫存 2～4），中文名稱正常顯示，門檻／排序／停售過濾這些業務規則完全不用自己重新想一遍——直接複用 service 層已經寫好、練習 3（活動 1）驗證過的規則，兩條路徑算出來的商品清單完全一致。
 
+**活動 2 練習 4（`cancel_order`）**：實作完要接回 Claude Code 測試時撞到一個小地雷——`dotnet build src/OrderHub.Mcp` 直接失敗，`MSB3027`/`MSB3021` 說 `OrderHub.Core.dll`/`OrderHub.Infrastructure.dll` 被 `OrderHub.Mcp.exe` (PID 32080) 鎖住——因為練習 3 註冊進 `.mcp.json` 之後，Claude Code 自己就一直開著一個 `dotnet run --project src/OrderHub.Mcp` 常駐行程在餵前三個工具，改完程式碼要重新編譯，那個常駐行程得先關掉才能釋放檔案鎖。`taskkill /PID 32080 /F` 之後 build 才過，但代價是這個 session 裡 Claude Code 對 orderhub MCP 的連線也跟著斷了（`get_order`/`low_stock`/`customer_orders` 全部變成「server disconnected」）——之後要重新用工具就得在 Claude Code 裡手動 reconnect（`/mcp`）。這也順帶回答了 5a 地雷區沒明講的一件事：**改 MCP server 程式碼之後一定要讓現有連線重啟才會生效，不是存檔就自動熱重載**。
+
 ### 3. AI 誤導我的地方，與我如何發現
 
 Bug 2 一開始 agent 純粹看 code，就先下了一個判斷：「Gold 應該是折扣打兩次、金額比手算少；Silver 應該是正常的」——這其實是照抄 `activity-guideline.md` 裡描述的客訴反推出來的，不是真的從我的觀察來的。等我回報「兩個 tier 金額其實都沒變」時，這個假設就先被推翻一次；後來我又補充「其實是 Gold 正常、Silver 沒打折」，agent 才修正說法，並且提醒我兩種可能（單價欄位 vs. 總額欄位）對應到不同的根因，要我確認我看的是哪一欄。
 
 老實說，我後來選擇「跳過頁面重現、直接看 code」，所以最後 agent 提出的 root cause（折扣邏輯散落在 `CreateOrderAsync` 和 `CalculateTotal` 兩處）從頭到尾都沒有拿實際頁面上的精確數字驗證過，只用「兩個 tier 修完後都『看起來對了』」帶過。這其實不是靠對照 code 或跑測試發現的，是回頭寫這份心得時才意識到「我沒有真的驗證」。
+
+**活動 2 練習 4**：想用 `npx @modelcontextprotocol/inspector --cli` 這個非互動 CLI 模式直接驗證 `cancel_order` 的 annotations（本來想比照練習 2 的瀏覽器 Inspector，但這次想全程用指令跑），結果同一個指令換幾種參數順序（`--method` 放 target 前/後、加不加 `--` 分隔符）就分別跳出三種不一樣、且互相矛盾的錯誤（`No servers found in config file`／`Target is required`／`Method is required`），花了好幾輪才確認是這個版本 CLI 的參數解析本身不穩定，不是我指令下錯——最後放棄 Inspector CLI，改寫一個十幾行的 Node 腳本直接對 `dotnet run --project src/OrderHub.Mcp` 送原生 JSON-RPC（`initialize` → `tools/list` → `tools/call`），才順利拿到 annotations 跟 `cancel_order` 的回應內容。教訓：官方工具的 `--help` 文字不代表當下裝到的版本行為一致，卡住超過一兩次嘗試就該考慮繞道，而不是一直換參數排列組合硬試。
 
 **練習 3**：低庫存查詢第一版寫成 LINQ 的 `join ... into ... DefaultIfEmpty()`（left join）疊 `GroupBy` 子查詢，agent 一開始很有信心地說這樣「一次查詢、不會有 N+1」，結果一跑 `dotnet test` 直接兩個測試炸掉：`System.InvalidOperationException: Nullable object must have a value`（EF Core InMemory provider 對這種 anonymous-type left join 的已知地雷）。這不是我用肉眼抓到的，是測試紅了才知道「看起來合理的 LINQ」不代表在這個 provider 上真的能跑。後來 agent 改成「先查一次符合門檻的商品、再查一次銷量彙總成 Dictionary、最後在記憶體裡合併」兩個查詢，問題就消失了。另外 review 建議把「threshold 必須 > 0」這條規則也搬進 Core service 用 exception 擋一次，agent 沒有照做，理由是專案既有慣例是用 DataAnnotations + ModelState 驗證輸入、不是丟 domain exception——這個我認同，但也代表**同一個 review 建議不是照單全收，要自己判斷跟不跟現有慣例衝突**。
 
@@ -113,7 +117,15 @@ Bug 2 一開始 agent 純粹看 code，就先下了一個判斷：「Gold 應該
 2. [x] 對照實驗完成且記錄 —— 見上方「AI 幫上大忙的地方」的 before/after 段落：沒有 MCP 得自己寫 SQL、自己記得 `IsActive` 過濾條件、還要處理中文亂碼；有 MCP 一次 `low_stock(threshold=5)` 呼叫拿到乾淨結果，兩邊算出的 5 筆商品（SKU-1048/1005/1023/1032/1014）完全一致
 3. [x] `.mcp.json` 進 git，一個獨立 commit
 
-練習 0、4～5 還沒開始。
+練習 4
+
+1. [x] MCP Inspector 中 `cancel_order` 的 annotations 如所標（`destructiveHint`、`idempotentHint=false`），三個唯讀工具則顯示 read-only —— 瀏覽器版 Inspector CLI 這次卡關（見上方「AI 誤導我的地方」），改用自寫的 Node 腳本對 server 送原生 JSON-RPC `tools/list`：`get_order`/`low_stock`/`customer_orders` 三個都回 `"annotations":{"readOnlyHint":true}`，`cancel_order` 回 `"annotations":{"destructiveHint":true,"idempotentHint":false}`，跟程式碼標註完全一致
+2. [ ] 對 agent 說「幫我取消訂單 X」：觀察權限確認提示——你按允許之前，資料不會被動到 —— **這項留給你自己在 Claude Code 裡驗證**：改完程式碼後我為了重新 build 把常駐的 `OrderHub.Mcp.exe` process kill 掉了，這個 session 對 orderhub MCP 的連線也跟著斷線，需要你在 Claude Code 執行 `/mcp` 重新連線之後，親自問一次「幫我取消訂單 X」，實際看到工具呼叫前的確認提示——這一步是 Claude Code 這個 client 的 UX，我用腳本直接打 JSON-RPC 繞過了 client，看不到、也不該假裝驗證過
+3. [x] 取消一筆待處理訂單成功，回 `/Products` 頁面確認庫存有回補 —— 沒有動用既有客訴單／seed 訂單，怕的是 Cancelled 狀態無法復原；改用 SQL 手動插入一筆一次性測試訂單（#210，客戶 1、SKU-1044 × 2，插入時同步把庫存從 98 扣到 96，模擬真實下單）。呼叫 `cancel_order(210)` 後回應「訂單 210 已取消,庫存已回補」，查 DB 確認 `Products.StockQuantity`（Id 44）真的從 96 回補到 98、`Orders.Status`（Id 210）變成 3（Cancelled）
+4. [x] 對同一筆訂單再取消一次、或挑一筆已出貨訂單取消：得到清楚的拒絕訊息而非 exception dump —— 對剛取消的 #210 再呼叫一次 `cancel_order`，回「取消失敗:狀態為 Cancelled 的訂單不可取消」；另外找一筆 seed 資料裡已出貨的訂單（#2，Status=Shipped）呼叫，回「取消失敗:狀態為 Shipped 的訂單不可取消」——兩次都是乾淨的文字訊息，沒有 stack trace
+5. [x] 獨立 commit；PROCESS.md 記錄
+
+練習 0、5 還沒開始。
 
 ---
 
