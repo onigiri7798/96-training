@@ -129,7 +129,7 @@ Bug 2 一開始 agent 純粹看 code，就先下了一個判斷：「Gold 應該
 
 1. [x] MCP Inspector:Resources 分頁讀得到 `orderhub://discount-rules`;Prompts 分頁能帶 `threshold` 參數取得展開後的訊息 —— 瀏覽器版 Inspector 這次沒再試（練習 4 已經踩過 CLI 版的坑），沿用練習 4 那套自寫 Node 腳本改打 `resources/list`／`resources/read`／`prompts/list`／`prompts/get`：resource 內容正確顯示 `Standard:不打折（0%）`／`Silver:折扣 5%`／`Gold:折扣 10%`；`prompts/get(threshold=5)` 回傳的訊息裡 `low_stock 工具(threshold=5)` 這段確實把參數代入進去了
 2. [x] Claude Code:`@` 選 resource 後問折扣問題,agent 用 resource 內容作答（Codex 用戶:Inspector 讀出 resource 內容貼進對話,問同一題）—— `/mcp` 重新連線後實際用 `@orderhub:orderhub://discount-rules` 附上 resource,問「what is the current active discount」：agent 完全沒有另外呼叫任何工具或去讀 `OrderService.cs`,系統直接把 resource 全文（`Standard 0%／Silver 5%／Gold 10%`）塞進 context,agent 照原文回答並換算「Gold 買 1000 元應付 900 元」——確認 resource 真的是「background 知識直接進 context」，不是又一種要另外呼叫的 tool
-3. [ ] Claude Code:`/mcp__orderhub__low_stock_report` 一鍵產出採購建議表 —— **留給你自己驗證**，原因同上：slash command 是 client 把 prompt 原語轉出來的 UI,不是我能直接呼叫的工具；`/mcp` 重新連線後可以直接打這個 slash command 看展開的內容跟後續 agent 自動接著呼叫 `low_stock` 的流程
+3. [x] Claude Code:`/mcp__orderhub__low_stock_report` 一鍵產出採購建議表 —— 打 `/mcp__orderhub__low_stock_report 30`，展開成 prompt 裡寫的那三句指令（`threshold=30` 有正確代入），agent 接著自動呼叫 `low_stock(threshold=30)` 拿到 11 筆商品,再逐一查近 30 天銷量（排除 Cancelled，沿用 Activity 1 練習 3 同一套統計邏輯）組成採購建議表。這次意外收穫：SKU-1005、SKU-1022 雖然庫存低於門檻，但近 30 天銷量是 0，agent 沒有機械式地照庫存數字建議補貨，而是標成「暫緩，先確認」——prompt 範本裡「再用其他工具了解近期訂單狀況」這句就是為了引導出這種判斷，不是單純把 `low_stock` 的結果直接當補貨清單
 4. [x] PROCESS.md 記錄 5c 第 3 點的思考;獨立 commit —— 見下方新增小節
 
 **5c 第 3 點的思考**（折扣規則用 Resource 給 vs. 讓 agent 自己讀 `OrderService.cs`；prompt 範本放 server vs. 每個人自己打一段話）：
