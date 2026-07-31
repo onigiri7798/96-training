@@ -95,9 +95,17 @@ Bug 2 一開始 agent 純粹看 code，就先下了一個判斷：「Gold 應該
 練習 1
 
 1. [x] `dotnet build src/OrderHub.Mcp` 成功 —— 另外也整個 solution build 過一次，確認新專案沒有連帶弄壞其他三個
-2. [ ] 一個獨立 commit（訊息說明新增了哪些工具） —— 這份 PROCESS.md 更新完後緊接著要做
+2. [x] 一個獨立 commit（訊息說明新增了哪些工具） —— `ab6a2bb`
 
-練習 0、2～5 還沒開始。
+練習 2
+
+1. [x] 三個工具都列得出來，且 description、參數說明如我所寫 —— Inspector 顯示的 description/參數說明跟 `OrderHubTools.cs` 裡寫的完全一致
+2. [x] 手動呼叫 `LowStock`(threshold=10)，回傳的商品和 `/Products` 頁面上的低庫存商品一致 —— 完全對得上
+3. [x] 呼叫 `GetOrder` 用一個不存在的 Id，回應是清楚的錯誤訊息而不是 exception dump —— 呼叫 `GetOrder(30000)`，回傳 `找不到訂單 30000`，沒有 exception dump
+
+練習 2 全是手動用 Inspector 驗證，沒有動到 `OrderHubTools.cs` 的程式碼——練習指南本身也沒有要求這步獨立 commit。
+
+練習 0、3～5 還沒開始。
 
 ---
 
