@@ -120,7 +120,7 @@ Bug 2 一開始 agent 純粹看 code，就先下了一個判斷：「Gold 應該
 練習 4
 
 1. [x] MCP Inspector 中 `cancel_order` 的 annotations 如所標（`destructiveHint`、`idempotentHint=false`），三個唯讀工具則顯示 read-only —— 瀏覽器版 Inspector CLI 這次卡關（見上方「AI 誤導我的地方」），改用自寫的 Node 腳本對 server 送原生 JSON-RPC `tools/list`：`get_order`/`low_stock`/`customer_orders` 三個都回 `"annotations":{"readOnlyHint":true}`，`cancel_order` 回 `"annotations":{"destructiveHint":true,"idempotentHint":false}`，跟程式碼標註完全一致
-2. [ ] 對 agent 說「幫我取消訂單 X」：觀察權限確認提示——你按允許之前，資料不會被動到 —— **這項留給你自己在 Claude Code 裡驗證**：改完程式碼後我為了重新 build 把常駐的 `OrderHub.Mcp.exe` process kill 掉了，這個 session 對 orderhub MCP 的連線也跟著斷線，需要你在 Claude Code 執行 `/mcp` 重新連線之後，親自問一次「幫我取消訂單 X」，實際看到工具呼叫前的確認提示——這一步是 Claude Code 這個 client 的 UX，我用腳本直接打 JSON-RPC 繞過了 client，看不到、也不該假裝驗證過
+2. [x] 對 agent 說「幫我取消訂單 X」：觀察權限確認提示——你按允許之前，資料不會被動到 —— 改完程式碼後為了重新 build，把常駐的 `OrderHub.Mcp.exe`（PID 32080）process kill 掉導致 orderhub 連線斷線；用 `/mcp` 重新連線後，實際對 agent 說「try to cancel order 207」，因為 `cancel_order` 標了 `Destructive = true`，Claude Code 在真的呼叫工具前跳出權限確認提示，按下允許後才執行——確認 210 那次是繞過 client 直接打 JSON-RPC，這次才是真的走 Claude Code 的確認流程。訂單 207（SKU-1001 × 2）取消後回應「訂單 207 已取消,庫存已回補」，查 DB 確認 `Orders.Status`（Id 207）已變成 3（Cancelled），`Products.StockQuantity`（SKU-1001）也已回補
 3. [x] 取消一筆待處理訂單成功，回 `/Products` 頁面確認庫存有回補 —— 沒有動用既有客訴單／seed 訂單，怕的是 Cancelled 狀態無法復原；改用 SQL 手動插入一筆一次性測試訂單（#210，客戶 1、SKU-1044 × 2，插入時同步把庫存從 98 扣到 96，模擬真實下單）。呼叫 `cancel_order(210)` 後回應「訂單 210 已取消,庫存已回補」，查 DB 確認 `Products.StockQuantity`（Id 44）真的從 96 回補到 98、`Orders.Status`（Id 210）變成 3（Cancelled）
 4. [x] 對同一筆訂單再取消一次、或挑一筆已出貨訂單取消：得到清楚的拒絕訊息而非 exception dump —— 對剛取消的 #210 再呼叫一次 `cancel_order`，回「取消失敗:狀態為 Cancelled 的訂單不可取消」；另外找一筆 seed 資料裡已出貨的訂單（#2，Status=Shipped）呼叫，回「取消失敗:狀態為 Shipped 的訂單不可取消」——兩次都是乾淨的文字訊息，沒有 stack trace
 5. [x] 獨立 commit；PROCESS.md 記錄
