@@ -125,7 +125,19 @@ Bug 2 一開始 agent 純粹看 code，就先下了一個判斷：「Gold 應該
 4. [x] 對同一筆訂單再取消一次、或挑一筆已出貨訂單取消：得到清楚的拒絕訊息而非 exception dump —— 對剛取消的 #210 再呼叫一次 `cancel_order`，回「取消失敗:狀態為 Cancelled 的訂單不可取消」；另外找一筆 seed 資料裡已出貨的訂單（#2，Status=Shipped）呼叫，回「取消失敗:狀態為 Shipped 的訂單不可取消」——兩次都是乾淨的文字訊息，沒有 stack trace
 5. [x] 獨立 commit；PROCESS.md 記錄
 
-練習 0、5 還沒開始。
+練習 5
+
+1. [x] MCP Inspector:Resources 分頁讀得到 `orderhub://discount-rules`;Prompts 分頁能帶 `threshold` 參數取得展開後的訊息 —— 瀏覽器版 Inspector 這次沒再試（練習 4 已經踩過 CLI 版的坑），沿用練習 4 那套自寫 Node 腳本改打 `resources/list`／`resources/read`／`prompts/list`／`prompts/get`：resource 內容正確顯示 `Standard:不打折（0%）`／`Silver:折扣 5%`／`Gold:折扣 10%`；`prompts/get(threshold=5)` 回傳的訊息裡 `low_stock 工具(threshold=5)` 這段確實把參數代入進去了
+2. [ ] Claude Code:`@` 選 resource 後問折扣問題,agent 用 resource 內容作答（Codex 用戶:Inspector 讀出 resource 內容貼進對話,問同一題）—— **留給你自己驗證**：這是 client 端的 `@` 選取 UI,我這邊用腳本直接打協定看得到 resource 內容對不對,但看不到 Claude Code 這個介面本身；`/mcp` 重新連線後可以試著 `@` 選 `orderhub` 的 discount-rules,再問一次「Gold 會員買 1000 元商品應付多少?」
+3. [ ] Claude Code:`/mcp__orderhub__low_stock_report` 一鍵產出採購建議表 —— **留給你自己驗證**，原因同上：slash command 是 client 把 prompt 原語轉出來的 UI,不是我能直接呼叫的工具；`/mcp` 重新連線後可以直接打這個 slash command 看展開的內容跟後續 agent 自動接著呼叫 `low_stock` 的流程
+4. [x] PROCESS.md 記錄 5c 第 3 點的思考;獨立 commit —— 見下方新增小節
+
+**5c 第 3 點的思考**（折扣規則用 Resource 給 vs. 讓 agent 自己讀 `OrderService.cs`；prompt 範本放 server vs. 每個人自己打一段話）：
+
+- **Resource vs. 讀 code**：這次實作 `OrderHubResources.DiscountRules()` 時故意不把 `0%/5%/10%` 寫死成字串常數，而是建構子注入 `IOrderService`，在方法裡即時呼叫 `orderService.GetDiscountRate(tier)` 組出 markdown——這樣以後 `OrderService` 改折扣率，resource 的文字會自動跟著變，不會出現「resource 說 9 折、code 早就改成 8.5 折」這種兩份真相同時存在的情況（練習指南「地雷區」提到的那個坑，這次是實作當下就避開，不是事後才發現）。如果反過來讓 agent 每次自己去讀 `OrderService.cs` 回答折扣問題，等於每次都要重新花一次工具呼叫＋重新推理那段 `switch` 表達式，多花 token、也多一次看漏某個 tier 的機會，而且團隊沒有一個「對外說法」的單一版本——每個人問出來的解釋用詞可能都不一樣。
+- **Prompt 放 server vs. 自己打**：`low_stock_report` 這段話進了 git、有版本控制，任何人連上這個 MCP（不限 Claude Code）打 `/mcp__orderhub__low_stock_report` 都拿到同一段指令；以後想在報告裡加一欄「建議補貨量的信賴區間」之類的需求，只要改 `OrderHubPrompts.cs` 一個地方，所有人下次連線自動拿到新版。如果每個人自己憑印象打這段話，措辭、涵蓋的欄位會各自漂移（有人可能忘記講「排除 Cancelled」），而且沒有單一地方可以一次改進所有人的問法，只能口頭一個個提醒。
+
+練習 0 還沒開始。
 
 ---
 
