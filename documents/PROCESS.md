@@ -23,6 +23,8 @@ Claude Code（Sonnet 5）
 
 **練習 3**：這次流程不一樣——先讓 agent 進 Plan Mode，讀完既有慣例（`ProductsController`、`IProductService`、既有 View、既有測試風格）之後先出一份完整計畫（要動哪些檔、每層放什麼、怎麼避免 N+1、驗證機制放哪），我看過確認才放行實作，沒有中途才發現分層跑掉。實作完也主動叫 `code-reviewer` subagent 審查一次（練習 1 裝好之後第一次真的拿來用），抓到問題才 commit。
 
+**活動 2 練習 1**：先請 agent 掃一次專案有沒有新練習，它從 git log 注意到新增的 `activity-2-custom-mcp.md` 直接找到了活動 2，順帶把 `mcp-security-attack-vectors.md` 也讀完摘要給我。確認完內容之後我才明確說「照練習 1 把 `src/OrderHub.Mcp` scaffold 出來」——沒有讓它自己猜要不要順便做練習 0（Playwright）或後面幾題，一次只推進一個練習。
+
 ### 2. AI 幫上大忙的地方
 
 Bug 1（分頁）最明顯：我只回了一句「the last page is empty after creating the new order」，agent 就直接在 `OrderRepository.GetPagedAsync` 抓到 `Skip(page * pageSize)` 應該是 `Skip((page - 1) * pageSize)` 的 off-by-one，還一次解釋清楚「新訂單在第一頁不見」跟「最後一頁空白」其實是同一個根因——比我自己去 trace 分頁邏輯快很多。
@@ -30,6 +32,8 @@ Bug 1（分頁）最明顯：我只回了一句「the last page is empty after c
 Bug 3（庫存不回補）也是同樣模式：agent 直接指出 `CancelOrderAsync` 裡 `order.Status = Cancelled` 那行寫在檢查 `order.Status == Pending/Confirmed` **之前**，導致回補庫存的那段 `if` 恆假、根本是死碼。這種「順序寫反」的 bug，靠肉眼掃一次 code 就抓到了，比我自己盯著看要快很多。
 
 **練習 3**：`code-reviewer` subagent 這次真的抓到兩個實質問題，不是走過場——`LowStockViewModel.Threshold` 上的 `[Range]` attribute 其實從沒被用到（controller 手動另外複製了一份一模一樣的檢查，兩處邏輯以後會各自漂移），以及 `LowStockProduct` 這個型別放在 `Core.Services` 命名空間卻被 `Core.Interfaces` 底下的介面引用（命名空間方向反了）。兩個都當場修掉，比我自己看 diff 更容易漏掉這種「能動但不對」的細節。
+
+**活動 2 練習 1**：兩個地方比我自己動手快很多。第一，`CLAUDE.md` 寫著「加 NuGet 套件前要先跟我確認」，agent 在跑 `dotnet add package` 之前真的停下來問我 `ModelContextProtocol` 跟 `Microsoft.Extensions.Hosting` 這兩個套件可不可以加，沒有自己先斬後奏。第二，`dotnet new console` 預設把新專案的 `TargetFramework` 建成 `net10.0`，但其他三個專案都是 `net8.0`——agent 自己發現這個不一致並改掉，不然這種「編譯得過但跟專案慣例不一致」的細節我很可能事後才會注意到。
 
 ### 3. AI 誤導我的地方，與我如何發現
 
@@ -85,6 +89,15 @@ Bug 2 一開始 agent 純粹看 code，就先下了一個判斷：「Gold 應該
 1. [x] 重構後 `dotnet test` 全綠 —— 44/44 全綠，包含練習 2、3 補的所有回歸測試；另外對跑著的網站補跑了一次真實表單（建單成功、重複商品仍正確被拒絕），確認不是只有 unit test 綠燈
 2. [x] 我能說出這次重構「改善了什麼、沒有改變什麼」。
 3. [x] 我有在 code review 的角度看過 diff（不是 agent 說好就好）
+
+### 第二階段 — MCP Server
+
+練習 1
+
+1. [x] `dotnet build src/OrderHub.Mcp` 成功 —— 另外也整個 solution build 過一次，確認新專案沒有連帶弄壞其他三個
+2. [ ] 一個獨立 commit（訊息說明新增了哪些工具） —— 這份 PROCESS.md 更新完後緊接著要做
+
+練習 0、2～5 還沒開始。
 
 ---
 
