@@ -137,7 +137,12 @@ Bug 2 一開始 agent 純粹看 code，就先下了一個判斷：「Gold 應該
 - **Resource vs. 讀 code**：這次實作 `OrderHubResources.DiscountRules()` 時故意不把 `0%/5%/10%` 寫死成字串常數，而是建構子注入 `IOrderService`，在方法裡即時呼叫 `orderService.GetDiscountRate(tier)` 組出 markdown——這樣以後 `OrderService` 改折扣率，resource 的文字會自動跟著變，不會出現「resource 說 9 折、code 早就改成 8.5 折」這種兩份真相同時存在的情況（練習指南「地雷區」提到的那個坑，這次是實作當下就避開，不是事後才發現）。如果反過來讓 agent 每次自己去讀 `OrderService.cs` 回答折扣問題，等於每次都要重新花一次工具呼叫＋重新推理那段 `switch` 表達式，多花 token、也多一次看漏某個 tier 的機會，而且團隊沒有一個「對外說法」的單一版本——每個人問出來的解釋用詞可能都不一樣。
 - **Prompt 放 server vs. 自己打**：`low_stock_report` 這段話進了 git、有版本控制，任何人連上這個 MCP（不限 Claude Code）打 `/mcp__orderhub__low_stock_report` 都拿到同一段指令；以後想在報告裡加一欄「建議補貨量的信賴區間」之類的需求，只要改 `OrderHubPrompts.cs` 一個地方，所有人下次連線自動拿到新版。如果每個人自己憑印象打這段話，措辭、涵蓋的欄位會各自漂移（有人可能忘記講「排除 Cancelled」），而且沒有單一地方可以一次改進所有人的問法，只能口頭一個個提醒。
 
-練習 0 還沒開始。
+練習 0
+
+1. [x] agent 能自己開瀏覽器完成操作並回傳截圖 —— Playwright MCP 這次已經是連線狀態（`browser_navigate`/`browser_snapshot`/`browser_select_option`/`browser_type`/`browser_click`/`browser_take_screenshot` 都可直接呼叫）。實際請 agent「建立一筆新訂單，截圖給我看結果頁」：先 `dotnet run --project src/OrderHub.Web` 起本機網站，navigate 到 `/Orders/Create`，用 `browser_snapshot` 讀出 accessibility tree 拿到客戶下拉／商品下拉／數量欄位的元素 ref，選客戶「陳志明（金卡會員）」、商品 SKU-1044（庫存 98）、數量 2，點「送出訂單」，自動導到 `/Orders/Details/211`，截圖顯示訂單 #211、小計 NT$6,220、會員折扣 (10%) -NT$622、應付總額 NT$5,598——全程沒有人手動點過滑鼠
+2. [x] 回想活動 1 練習 2：當時人工重現 bug 的步驟，現在 agent 可以自己做——把這個對比記進 PROCESS.md —— 見下方新增小節
+
+**練習 0 的對比（人工重現 vs. agent 用 Playwright 自己操作）**：活動 1 練習 2 的 Bug 1，是我自己在瀏覽器裡建單、翻頁、肉眼觀察「最後一頁空白」，再把這句話（"the last page is empty after creating the new order"）轉述給 agent——agent 收到的是我對畫面的**文字轉述**，不是畫面本身，過程中不精確的地方（例如沒給精確頁碼）就是這次轉述漏掉的資訊。這次用 Playwright MCP，agent 自己 `browser_snapshot` 讀到的是頁面的 accessibility tree／截圖是頁面本身的畫素——agent 能直接讀到「會員折扣 (10%)」「應付總額 NT$5,598」這些精確文字與數字，不用我用嘴巴形容「折扣好像不太對」再讓 agent 猜。差別是：**人工重現要靠人把觀察轉譯成語言，agent 自己操作則是直接讀取畫面內容，跳過轉譯這一層、也跳過轉譯會失真的風險**；但代價是我這次全程沒有自己盯著瀏覽器看，等於也少了一次「人工核對 agent 說法」的機會——這正好呼應 PROCESS.md 最上面那條原則：agent 的回答永遠要人工驗證，只是這次連「餵給 agent 的觀察」都是 agent 自己生成的，人工驗證的步驟不能省。
 
 ---
 
