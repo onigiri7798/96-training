@@ -22,4 +22,4 @@ node_modules/
 *.local.json
 
 # Claude Code hook runtime output (not shared config)
-.claude/hooks/edit-log.txt
+**/.claude/hooks/edit-log.txt
