@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Rendering;
+using OrderHub.Core.Ai;
 using OrderHub.Core.Domain;
 using OrderHub.Core.Services;
 using OrderHub.Web.Helpers;
@@ -14,15 +15,18 @@ public class OrdersController : Controller
     private readonly IOrderService _orderService;
     private readonly ICustomerService _customerService;
     private readonly IProductService _productService;
+    private readonly IOrderSearchService _orderSearchService;
 
     public OrdersController(
         IOrderService orderService,
         ICustomerService customerService,
-        IProductService productService)
+        IProductService productService,
+        IOrderSearchService orderSearchService)
     {
         _orderService = orderService;
         _customerService = customerService;
         _productService = productService;
+        _orderSearchService = orderSearchService;
     }
 
     public async Task<IActionResult> Index(int page = 1, OrderStatus? status = null)
@@ -46,6 +50,41 @@ public class OrdersController : Controller
             TotalPages = result.TotalPages,
             Status = status
         };
+
+        return View(vm);
+    }
+
+    /// <summary>
+    /// 自然語言查訂單：沿用練習 1 的 IOrderSearchService，這一層只做轉接與顯示。
+    /// AI 服務不可用時顯示訊息，不讓它變成錯誤頁。
+    /// </summary>
+    [HttpGet]
+    public async Task<IActionResult> Search(string? q, CancellationToken cancellationToken)
+    {
+        var vm = new OrderSearchViewModel { Query = q ?? string.Empty };
+        if (string.IsNullOrWhiteSpace(q))
+            return View(vm);
+
+        try
+        {
+            var result = await _orderSearchService.SearchAsync(q, cancellationToken);
+            if (!result.Success)
+                vm.ErrorMessage = result.ErrorMessage;
+            else
+                vm.Orders = result.Value!.Select(o => new OrderRowViewModel
+                {
+                    Id = o.Id,
+                    CustomerName = o.Customer?.Name ?? "-",
+                    Status = o.Status,
+                    Total = _orderService.CalculateTotal(o),
+                    ItemCount = o.Items.Count,
+                    CreatedAt = o.CreatedAt
+                }).ToList();
+        }
+        catch (AiServiceUnavailableException ex)
+        {
+            vm.ErrorMessage = ex.Message;
+        }
 
         return View(vm);
     }
