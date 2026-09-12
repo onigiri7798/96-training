@@ -192,6 +192,29 @@ Bug 2 一開始 agent 純粹看 code，就先下了一個判斷：「Gold 應該
 
 **沒有做的部分（誠實記錄）**：活動 3 只有練習 1、練習 2；文件裡提到「活動 4 的自動化流程要打這個 API」，活動 4 的文件目前還不在 `documents/activities/` 底下，所以沒有動。
 
+### 第四階段 — n8n 自動化
+
+（這一階段換成 Claude Code（Opus 5，1M context），前三階段是 Sonnet 5）
+
+補齊 — MCP server 加開 HTTP transport
+
+1. [x] HTTP 端點列得出四個工具、resource、prompt —— 沒有用指南寫的 Inspector（那要開 GUI），改用 curl 直接對 `http://localhost:3001` 打 JSON-RPC：`initialize` 回 `OrderHub.Mcp 1.0.0.0`，`tools/list` 回 `customer_orders`／`get_order`／`low_stock`／`cancel_order` 四個，`resources/list` 回 `orderhub://discount-rules`，`prompts/list` 回 `low_stock_report`。再多打一發 `tools/call low_stock {threshold:10}`，回的是真實資料（SKU-1048 庫存 2、SKU-1005 庫存 3……）——這步是刻意加的：握手成功只證明 transport 活著，這發才證明整條路（transport → tool → service → repository → SQL Server）都通
+2. [x] 不帶 `--http` 照舊走 stdio —— 先用 PowerShell 把三行 JSON-RPC 灌進子行程的 stdin，stdout 回乾淨的 JSON、log 全部在 stderr（協定通道沒被污染）。但指南要的是「Claude Code `/mcp` 裡的 orderhub 一切正常」，所以重開 Claude Code 之後又從 `/mcp` 的 orderhub 呼叫一次 `low_stock`（threshold 5），回 5 筆真實商品——這才算真的驗完
+3. [x] 一個獨立 commit —— `49aba9e`
+
+**版本號不能照抄**：指南叫我裝 `ModelContextProtocol.AspNetCore --version 2.0.0-preview.2`，理由寫得很對——「要跟 csproj 裡既有的 `ModelContextProtocol` 對齊」——但 csproj 現在已經是穩定版 `2.0.0`，照抄那個版號反而會踩到指南自己警告的 NU1605 降版錯誤。實際裝 `2.0.0`，restore 一次過。這跟活動 3 那條教訓是同一個形狀：**指南給的是結構，不是可以無腦貼上的答案**，版本號這種會隨時間漂移的東西尤其要當場開 csproj 對一次。順手把 `activity-4-n8n.md` 的版號、一個從來沒被 commit 進 repo 的圖片連結（`../references/n8n-flow.png`）、一個錯字修掉：`6dd5f1b`、`5d64518`
+
+**「換的只是 transport」是真的**：`OrderHubTools.cs`／`OrderHubResources.cs`／`OrderHubPrompts.cs` 一行都沒動，`.mcp.json` 也沒動。`Program.cs` 多的只是一個 `if (args.Contains("--http"))` 分支，DI 接線抽成共用的 `AddOrderHubServices`，讓兩條 transport 的服務註冊不可能各自漂移。MCP 把「工具是什麼」和「怎麼傳輸」分開這件事，到這裡才真的有體感
+
+**踩到的兩個坑**：
+
+- **專案被自己鎖住**：`dotnet build` 在 `OrderHub.Mcp` 報 MSB3021，`file is locked by: OrderHub.Mcp (43540)`——鎖住 exe 的就是 Claude Code 自己從 `.mcp.json` 拉起來的那個 stdio server。當下先用 `-o <scratchpad>` 把輸出丟去別的資料夾才 build／驗證得下去，最後收掉 Claude Code 重開才恢復正常。這是 stdio MCP server 在開發期的固有摩擦：**server 活著＝那個專案不能重建**，而且 agent 自己就是那個抓著檔案不放的人
+- **push 不上去，不是密碼打錯**：全域 `.gitconfig` 有一段 `[credential ""] provider = generic`（應該是為了公司的 Azure DevOps／TFS 設的），它對**所有** host 生效，逼 Git Credential Manager 走「帳號＋密碼」的舊對話框；GitHub 從 2021 年就不收密碼了，所以打幾次都是 `Invalid username or token`。解法不是改那段（會動到公司的設定），而是加一條只針對 GitHub 的覆寫：`git config --global credential.https://github.com.provider github`，之後 GCM 就改走瀏覽器 OAuth，一次登入就過
+
+整體：`dotnet test` **63/63 全綠**（這階段沒新增測試——改的只有 `OrderHub.Mcp`，它不在測試專案的依賴鏈上）；`dotnet build` 整個 solution 在重開之後成功。三個 commit 都已 push 上 `origin/main`（tip 是 `5d64518`）。
+
+**沒有做的部分（誠實記錄）**：活動 4 目前只做完「補齊」這一節。練習 1（Hello Webhook）、練習 2（退單巡檢日報）、練習 3（MCP 合體）都還沒開始——n8n 本身還沒裝起來跑過，所以 Schedule Trigger、AI Agent、IF 分流、Data Table、GitHub issue 這些節點一個都還沒碰。練習 2 要求在 PROCESS.md 回答的那題（「如果『查什麼、怎麼查』也交給 AI Agent 自由發揮，會失去什麼？」）因此也還沒答。
+
 ---
 
 ## 附錄：值得留下的對話片段
