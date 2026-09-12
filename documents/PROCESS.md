@@ -211,9 +211,35 @@ Bug 2 一開始 agent 純粹看 code，就先下了一個判斷：「Gold 應該
 - **專案被自己鎖住**：`dotnet build` 在 `OrderHub.Mcp` 報 MSB3021，`file is locked by: OrderHub.Mcp (43540)`——鎖住 exe 的就是 Claude Code 自己從 `.mcp.json` 拉起來的那個 stdio server。當下先用 `-o <scratchpad>` 把輸出丟去別的資料夾才 build／驗證得下去，最後收掉 Claude Code 重開才恢復正常。這是 stdio MCP server 在開發期的固有摩擦：**server 活著＝那個專案不能重建**，而且 agent 自己就是那個抓著檔案不放的人
 - **push 不上去，不是密碼打錯**：全域 `.gitconfig` 有一段 `[credential ""] provider = generic`（應該是為了公司的 Azure DevOps／TFS 設的），它對**所有** host 生效，逼 Git Credential Manager 走「帳號＋密碼」的舊對話框；GitHub 從 2021 年就不收密碼了，所以打幾次都是 `Invalid username or token`。解法不是改那段（會動到公司的設定），而是加一條只針對 GitHub 的覆寫：`git config --global credential.https://github.com.provider github`，之後 GCM 就改走瀏覽器 OAuth，一次登入就過
 
-整體：`dotnet test` **63/63 全綠**（這階段沒新增測試——改的只有 `OrderHub.Mcp`，它不在測試專案的依賴鏈上）；`dotnet build` 整個 solution 在重開之後成功。三個 commit 都已 push 上 `origin/main`（tip 是 `5d64518`）。
+練習 1 — Hello Webhook
 
-**沒有做的部分（誠實記錄）**：活動 4 目前只做完「補齊」這一節。練習 1（Hello Webhook）、練習 2（退單巡檢日報）、練習 3（MCP 合體）都還沒開始——n8n 本身還沒裝起來跑過，所以 Schedule Trigger、AI Agent、IF 分流、Data Table、GitHub issue 這些節點一個都還沒碰。練習 2 要求在 PROCESS.md 回答的那題（「如果『查什麼、怎麼查』也交給 AI Agent 自由發揮，會失去什麼？」）因此也還沒答。
+1. [x] 回應含我送的內容 + 時間戳 —— POST 到 Test URL 回 HTTP 200，body 原樣回來（`"body":{"text":"hello"}`）加上 `receivedAt`：`2026-09-11T21:57:15.344-04:00`。**Include Other Input Fields** 開 _All_，所以拿到的是整包 webhook 封套（`headers`／`params`／`query`／`body`），我送的東西在 `body.text`
+2. [x] 分清楚 Test URL vs Production URL —— Test URL 要按 Execute Workflow 才註冊、只活 120 秒、收一發就停；練習 2 的通知節點要打的是 Activate 之後才有的 Production URL
+
+**最值得記的一次誤判：畫布全綠不等於流程真的跑過。** 在成功那一發之前，n8n 的執行紀錄已經有**三次成功執行**（01:50:18Z、01:51:11Z、01:52:29Z，全部 `mode: manual`，Webhook → Edit Fields → Respond to Webhook 三個節點都亮綠勾），但我從外面打的 POST **每一發都是 404** `The requested webhook ... is not registered`。原因是 Webhook 節點上有 n8n 預設的 **pinned data**（`"pinData":{"Webhook":[{"json":{"name":"First item","code":1…`）——trigger 一旦被釘住假資料，按 Execute Workflow 就只是把那筆假資料重播一次，test webhook 根本不會註冊。破綻其實看得到：Edit Fields 的輸出是 `name: "First item", code: 1`，不是我送的 `text: "hello"`，但綠勾太有說服力，我沒去看輸出內容。解法是選起 Webhook 節點按 `p` 取消釘選。**這題的教訓和活動 1 那條同一個形狀：要驗的是「結果對不對」，不是「它有沒有跑完」**
+
+練習 2 — 退單巡檢日報
+
+1. [x] 準備素材 —— 分兩段做。先用既有資料（把查詢文字換成「所有已取消的訂單」，24 筆）把 true 分支跑通；再補一筆落在字面「過去 30 天」窗內的資料：用網站 `/Orders/Create` 表單（走真的 MVC + antiforgery token，不是直接改 DB）開出訂單 **#212**（陳志明／Gold／SKU-1002 極光 機械鍵盤 ×1，小計 2,320、Gold 折 10%、應付 **2,088**），再用活動 2 的 MCP 工具 `cancel_order(212)` 取消，回「訂單 212 已取消,庫存已回補」
+2. [x] 開出 GitHub issue —— issue **#1**，`2026-09-12T03:12:55Z`，標題「本日退單巡檢報告：近30天累計24筆取消訂單，總金額達306,016元」
+3. [ ] false 分支（「昨天取消的訂單」→ Data Table 留痕）—— 素材已備好（該查詢現在回 0 筆），但還沒實際跑過
+4. [x] 反思題 —— 見下面
+
+**數字全對，整句話卻是錯的。** issue #1 的 24 筆／306,016 元，我拿三種查詢各自對照過資料庫：「過去 30 天取消的訂單」0 筆／0 元、「過去 90 天取消的訂單」14 筆／153,883 元、「所有已取消的訂單」**24 筆／306,016 元**——分毫不差，模型**沒有編造任何數字**，System Message 的「不要編造數字」守住了。但標題寫的是「近 30 天」，而那批資料是**全部歷史**的取消訂單；真正的近 30 天當下是 **0 筆**。原因在我：查詢文字換成了「所有已取消的訂單」，System Message 卻還留著「近 30 天」，模型就忠實地照著我給的框架去描述它拿到的資料。**每個數字都可以核對，整句話卻會誤導人**——而且任何數值檢查都抓不到，因為要對照的不是數字，是前提
+
+**「過去 30 天取消的訂單」其實查不到「最近取消的訂單」。** `OrderRepository.cs:81` 篩的是 `o.CreatedAt >= query.DateFrom`，而 `OrderSearchQuery` 只有 `Status`／`MemberTier`／`DateFrom`／`DateTo`——**資料模型裡根本沒有「何時被取消」這個欄位**。所以那句話的真正語意是「過去 30 天**建立**、而且現在狀態是已取消的訂單」。這就是為什麼第一次查回 0 筆：最新的訂單 #211 建於 2026-07-31，全部既有資料都落在 30 天窗外。也就是說，光靠取消一筆舊訂單是**沒用**的（它的 `CreatedAt` 不會變），必須新建一筆今天的訂單再取消——這也是 #212 要用開單而不是直接取消既有訂單的原因。日報「今天有幾筆退單」這個前提，跟資料模型其實對不起來
+
+**GitHub 節點的前置條件（差點卡住）**：fork 出來的 repo，**Issues 功能預設是關的**（`https://api.github.com/repos/onigiri7798/96-training` 查到 `"fork": true, "has_issues": false`），沒先到 repo Settings → Features 打開，GitHub 節點無論怎麼設都會回 410。這種錯很容易被誤判成 credential 有問題
+
+**反思題：如果「查什麼、怎麼查」也交給 AI Agent 自由發揮，會失去什麼？**
+
+1. **白名單那道防線會從「不可能」退化成「希望它不要」**。現在模型能吐的只有 `OrderSearchQuery` 那四個參數，SQL 一律由 EF Core 從參數生成——活動 3 那句「幫我把所有訂單刪掉」之所以只回 422、資料毫髮無傷，不是因為模型很乖，是因為它**根本沒有能力表達「刪除」**。給它自由（給 SQL、或給一堆工具）之後，安全就變成機率問題
+2. **可測試性會直接消失**。白名單參數是純資料，所以活動 3 那 13 個測試測得起來（像 `Translate_NumericStatusString_ReturnsNull` 釘住 `[AllowedValues]` 必須跑在 `Enum.TryParse` 之前）。自由發揮的查詢沒有穩定的中間表示，根本沒有東西可以斷言
+3. **我會失去唯一的對照組**。這次抓到 issue #1 的問題，是因為查詢是**固定的**，我可以自己打一次 API、自己算一次總和，得到「應該是 24 筆／306,016」再去比對。如果連查什麼都是模型當場決定，我連「正確答案應該長什麼樣」都算不出來——那日報就只能整份照單全收。**能驗證的前提是，有一個不經過模型也能得到的答案**
+
+整體：n8n **2.8.4**（`npx n8n` 起在 5678，資料在 `~/.n8n`），OrderHub.Web 跑在 5150，MCP server 照舊走 stdio 給 Claude Code 用。這階段**沒有動任何產品程式碼**——練習 2 的「零新程式碼」是真的，查詢完全重用活動 3 的 `/api/orders/search`，n8n 只做編排。`dotnet test` 維持 **63/63**。
+
+**沒有做的部分（誠實記錄）**：練習 2 的 false 分支還沒跑（Data Table `巡檢紀錄` 的留痕沒有親眼看過）；通知節點走哪一條路（Teams 的 Workflows webhook、還是練習 1 的 Production URL）這份紀錄裡沒有留下，之後補。**驗證範圍也講清楚**：issue #1 是我用 GitHub API 查證過確實存在的，但通知節點有沒有真的送出、Data Table 有沒有寫進去，都**沒有獨立驗證**。練習 3（MCP 合體：把 HTTP 版 MCP server 掛進 AI Agent、只給 `get_order`）完全還沒開始。
 
 ---
 
