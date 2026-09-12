@@ -68,7 +68,7 @@ if (args.Contains("--http"))
 
     var app = builder.Build();
     app.MapMcp();
-    app.Run("http://localhost:3001"); // 若果port已被暫用則另選port
+    app.Run("http://localhost:3001"); // 若果port已被佔用則另選port
 }
 else
 {
