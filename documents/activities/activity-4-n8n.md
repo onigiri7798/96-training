@@ -25,10 +25,10 @@ npx n8n
 
 ### a. 加套件與 framework reference
 
-版本要跟 csproj 裡既有的 `ModelContextProtocol` 對齊(目前是 `2.0.0-preview.2`)——用 `--prerelease` 會抓最新的 preview.3,和鎖住的 preview.2 打架,restore 直接報 NU1605 降版錯誤:
+版本要跟 csproj 裡既有的 `ModelContextProtocol` 對齊(目前是穩定版 `2.0.0`)——兩個套件版號不一致,restore 就會報 NU1605 降版錯誤。所以不要用 `--prerelease` 去抓最新的 preview,也不要照抄舊講義裡的 preview 版號:
 
 ```powershell
-dotnet add src/OrderHub.Mcp package ModelContextProtocol.AspNetCore --version 2.0.0-preview.2
+dotnet add src/OrderHub.Mcp package ModelContextProtocol.AspNetCore --version 2.0.0
 ```
 
 `src/OrderHub.Mcp/OrderHub.Mcp.csproj` 裡加一段(console 專案要借用 ASP.NET Core 才能開 HTTP 端點):
@@ -232,8 +232,7 @@ Schedule Trigger(每天 09:00;測試時直接按 Execute Workflow)
      - 欄位 **note**:填 `本日無退單`
    - 跑完到 **Data tables** 分頁點開表,應該多一列今天的紀錄——這就是歸檔證據
 
-流程圖：
-![workflow](../references/n8n-flow.png)
+流程圖：見上面「流程設計」那一段的節點圖。(原文這裡引用的 `../references/n8n-flow.png` 沒有收進 repo;想留畫布截圖的話,自己存一張到那個路徑再把圖片連結加回來。)
 
 ### 分工是刻意的
 
